@@ -7,6 +7,7 @@ API_KEY = "05bd8076417d8b663d519bd297478156"
 BASE_URL = "http://api.openweathermap.org/data/2.5/weather"
 app = Flask(__name__)
 app.secret_key = '123'
+FORECAST_URL = "http://api.openweathermap.org/data/2.5/forecast"
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///site.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
@@ -74,7 +75,7 @@ def register():
 
 @app.route('/success')
 def success():
-    return render_template('dashboard.html')
+    return render_template('dashboard.html', weather=None)
 
 
 @app.route('/logout')
@@ -89,37 +90,51 @@ def weather():
     if not city:
         flash('Пожалуйста, введите название города', 'error')
         return redirect(url_for('success'))
-
     try:
-        response = requests.get(
+        current_response = requests.get(
             BASE_URL,
             params={
                 'q': city,
                 'appid': API_KEY,
-                'units': 'metric'
+                'units': 'metric',
+                'lang': 'ru'
             }
         )
-        data = response.json()
-
-        if response.status_code == 404 or data.get('cod') == '404':
+        current_data = current_response.json()
+        if current_response.status_code == 404 or current_data.get('cod') == '404':
             flash('Город не найден. Пожалуйста, проверьте название', 'error')
             return redirect(url_for('success'))
-
-        if response.status_code != 200:
+        if current_response.status_code != 200:
             flash('Ошибка при получении данных о погоде', 'error')
             return redirect(url_for('success'))
-
+        forecast_response = requests.get(
+            FORECAST_URL,
+            params={
+                'q': city,
+                'appid': API_KEY,
+                'units': 'metric',
+                'lang': 'ru'
+            }
+        )
+        forecast_data = forecast_response.json()
+        forecast_list = forecast_data['list']
+        dates = []
+        temps = []
+        for forecast in forecast_list:
+            dates.append(forecast['dt_txt'])
+            temps.append(forecast['main']['temp'])
         weather_data = {
-            'city': data['name'],
-            'temperature': data['main']['temp'],
-            'description': data['weather'][0]['description'],
-            'icon': data['weather'][0]['icon'],
-            'humidity': data['main']['humidity'],
-            'wind': data['wind']['speed'],
-            'time': 'Now'
+            'city': current_data['name'],
+            'temperature': current_data['main']['temp'],
+            'description': current_data['weather'][0]['description'],
+            'icon': current_data['weather'][0]['icon'],
+            'humidity': current_data['main']['humidity'],
+            'wind': current_data['wind']['speed'],
+            'time': 'Now',
+            'forecast_dates': dates,
+            'forecast_temps': temps
         }
         return render_template('dashboard.html', weather=weather_data)
-
     except Exception as e:
         flash('Произошла ошибка при запросе данных о погоде', 'error')
         return redirect(url_for('success'))
