@@ -1,7 +1,10 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
+import requests
 
+API_KEY = "05bd8076417d8b663d519bd297478156"
+BASE_URL = "http://api.openweathermap.org/data/2.5/weather"
 app = Flask(__name__)
 app.secret_key = '123'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///site.db'
@@ -22,17 +25,16 @@ class User(db.Model):
 @app.route('/')
 @app.route('/home')
 def index():
-    return render_template('sign_in.html')
+    return render_template('register.html')
 
 
 @app.route('/login', methods=['POST'])
 def login():
     email = request.form.get('email')
     password = request.form.get('password')
-
     user = User.query.filter_by(email=email).first()
-
     if user and check_password_hash(user.password, password):
+        session['username'] = user.username
         return redirect(url_for('success'))
     else:
         flash('Invalid email or password', 'error')
@@ -46,36 +48,78 @@ def register():
         email = request.form.get('email')
         password = request.form.get('password')
         confirm_password = request.form.get('confirm_password')
-
         if password != confirm_password:
             flash('Passwords do not match!', 'error')
             return redirect(url_for('register'))
-
         if User.query.filter_by(email=email).first():
             flash('Email already registered!', 'error')
             return redirect(url_for('register'))
-
         if User.query.filter_by(username=username).first():
             flash('Username already taken!', 'error')
             return redirect(url_for('register'))
 
         hashed_password = generate_password_hash(password)
-
         new_user = User(
             username=username,
             email=email,
             password=hashed_password
         )
-
         db.session.add(new_user)
         db.session.commit()
 
         flash('Registration successful! Please login.', 'success')
         return redirect(url_for('index'))
-
-    return render_template('log_in.html')
+    return render_template('login.html')
 
 
 @app.route('/success')
 def success():
-    return "Login successful!"
+    return render_template('dashboard.html')
+
+
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    return redirect(url_for('index'))
+
+
+@app.route('/weather', methods=['POST'])
+def weather():
+    city = request.form.get('city')
+    if not city:
+        flash('Пожалуйста, введите название города', 'error')
+        return redirect(url_for('success'))
+
+    try:
+        response = requests.get(
+            BASE_URL,
+            params={
+                'q': city,
+                'appid': API_KEY,
+                'units': 'metric'
+            }
+        )
+        data = response.json()
+
+        if response.status_code == 404 or data.get('cod') == '404':
+            flash('Город не найден. Пожалуйста, проверьте название', 'error')
+            return redirect(url_for('success'))
+
+        if response.status_code != 200:
+            flash('Ошибка при получении данных о погоде', 'error')
+            return redirect(url_for('success'))
+
+        weather_data = {
+            'city': data['name'],
+            'temperature': data['main']['temp'],
+            'description': data['weather'][0]['description'],
+            'icon': data['weather'][0]['icon'],
+            'humidity': data['main']['humidity'],
+            'wind': data['wind']['speed'],
+            'time': 'Now'
+        }
+        return render_template('dashboard.html', weather=weather_data)
+
+    except Exception as e:
+        flash('Произошла ошибка при запросе данных о погоде', 'error')
+        return redirect(url_for('success'))
